@@ -2,26 +2,30 @@
 
 .PHONY: clean
 HOST_PLATFORM := ${MACHINE_ARCH}
-HOST_OS := ${MACHINE_OS}
+HOST_OS != uname -s
 
-PLATFORMS_64 := arm64 aarch64 amd64 i86pc loongarch64 mips64 mips64el ppc64 ppc64le riscv64 s390x sparc sparc4v sparc64 x86_64
+PLATFORMS_64 := arm64 aarch64 amd64 i86pc loongarch64 mips64 mips64el ppc64 ppc64le riscv64 s390x sparc sun4v sparc64 x86_64
 PLATFORMS_32 := armv7l i386 i686 mips mipsel
 
 ### override these for cross-building:
 PLATFORM ?= ${MACHINE_ARCH}
 .for P in ${PLATFORMS_64}
-.if ${P} == ${PLATFORM}
+.if "${P}" == "${PLATFORM}"
 PLATFORM_SIZE ?= 64
 .endif
 .endfor
 
 .for P in ${PLATFORMS_32}
-.if ${P} == ${PLATFORM}
+.if "${P}" == "${PLATFORM}"
 PLATFORM_SIZE ?= 32
 .endif
 .endfor
 
 .ifndef PLATFORM_SIZE
+PLATFORM_SIZE != expr $$(echo __SIZEOF_LONG__ | ${CC} -E -P -x c - 2>/dev/null) \* 8 2>/dev/null || :
+.endif
+
+.if empty(PLATFORM_SIZE)
 .error Set PLATFORM_SIZE to 32 or 64 and try again
 .endif
 
@@ -32,15 +36,18 @@ CC_MARCH ?= native
 .endif
 CC_MTUNE ?= ${CC_MARCH}
 
-SEC_CFLAGS := -Wformat -Werror=format-security -D_FORTIFY_SOURCE=2 -fstack-protector-strong
+STACK_PROTECTOR != ${CC} -Werror -fstack-protector-strong -E -x c /dev/null >/dev/null 2>&1 && echo -fstack-protector-strong || :
+SEC_CFLAGS := -Wformat -Werror=format-security -D_FORTIFY_SOURCE=2 ${STACK_PROTECTOR}
 BASE_CFLAGS := -fpie -fPIC -Wall -Wextra -pedantic -O2 -fwrapv -DGETRANDOM -Werror
+NO_IVOPTS != ${CC} -Werror -fno-ivopts -c -x c /dev/null -o /dev/null >/dev/null 2>&1 && echo -fno-ivopts || :
+BASE_CFLAGS+=${NO_IVOPTS}
 BASE_CFLAGS+=-DPLATFORM=${PLATFORM} -DPLATFORM_SIZE=${PLATFORM_SIZE}
 BASE_CFLAGS+=${SEC_CFLAGS}
 # XXX refactor into bmake dialect
 #BASE_CFLAGS+=$(if $(strip $(CC_MARCH)),-march=$(CC_MARCH) -mtune=$(CC_MTUNE),)
 
-.for H in ${HOST_OS} OpenBSD DragonFly Darwin
-.if ${H} == ${HOST_OS} 
+.for H in OpenBSD DragonFly Darwin
+.if "${H}" == "${HOST_OS}"
 BASE_CFLAGS+=-D__${HOST_OS}__
 .endif
 .endfor
@@ -53,7 +60,11 @@ LDFLAGS+=-Wl,-Bsymbolic-functions
 LDFLAGS+=-Wl,--reduce-memory-overheads -Wl,--no-keep-memory
 .endif
 
-.if ${CC} == clang
+.if ${HOST_OS} == OpenBSD
+LDFLAGS+=-pthread
+.endif
+
+.if !empty(CC:M*clang*)
 BASE_CFLAGS+=-Wno-unused-command-line-argument
 .endif
 
@@ -75,7 +86,7 @@ BASE_CFLAGS+=-DPLATFORM=${PLATFORM} -DPLATFORM_SIZE=${PLATFORM_SIZE}
 BASE_CFLAGS+=-fpie -fPIC
 CFLAGS = ${BASE_CFLAGS}
 .endif
-.if ${CC} clang
+.if ${CC} == clang
 HIGHCTIDH_PORTABLE ?=1
 BASE_CFLAGS+=-DPLATFORM=${PLATFORM} -DPLATFORM_SIZE=${PLATFORM_SIZE}
 CFLAGS = ${BASE_CFLAGS} -Wno-unused-command-line-argument
@@ -114,7 +125,7 @@ libhighctidh_2048_OBJS := uintbig2048.o fp2048.o
 
 
 .for P in arm64 aarch64
-.if ${P} == ${PLATFORM}
+.if "${P}" == "${PLATFORM}"
 CFLAGS+= ${BASE_CFLAGS}
 .endif
 .endfor
@@ -166,10 +177,9 @@ CFLAGS+= -march=z10 -mtune=z10
 
 .if ${HOST_OS} == SunOS
 .for P in sparc sun4u sun4v sparc64 i86pc i386 
-.if ${P} == ${PLATFORM}
+.if "${P}" == "${PLATFORM}"
 BASE_CFLAGS+=${SEC_CFLAGS}
 CFLAGS+=${BASE_CFLAGS} -m64 -D__sun
-LDFLAGS+=${LDFLAGS}
 .if ${PLATFORM} == i86pc
 CFLAGS+=-D__i86pc__
 .if ${CC} == gcc
@@ -182,8 +192,7 @@ CFLAGS+=-D__i386__
 CFLAGS+=-mimpure-text
 .endif
 .endif
-.for P in sparc sun4u sun4v sparc64
-.if ${P} == ${PLATFORM}
+.if !empty(PLATFORM:Msparc*) || !empty(PLATFORM:Msun4*)
 CFLAGS+=-DHIGHCTIDH_PORTABLE=1 -D__sun4v__
 .if ${CC} == gcc
 CFLAGS+=-mcpu=native -mtune=native -D_REENTRANT
@@ -193,13 +202,9 @@ CFLAGS+=-mcpu=native -mtune=native -D_REENTRANT
 .endfor
 .endif
 
-.if ${PLATFORM} == unknown
-CFLAGS+= ${BASE_CFLAGS}
-.endif
-
 .if ${HOST_OS} != SunOS
 .for P in amd64 x86_64 i386 i686
-.if ${P} == ${PLATFORM}
+.if "${P}" == "${PLATFORM}"
 .if ${PLATFORM_SIZE} == 32
 CFLAGS+= ${BASE_CFLAGS} -D__i386__
 .if ${CC} == clang
@@ -212,6 +217,11 @@ CFLAGS+= ${BASE_CFLAGS} -D__x86_64__
 .endfor
 .endif
 
+.if empty(CFLAGS:M-DPLATFORM_SIZE*)
+CFLAGS+= ${BASE_CFLAGS}
+.endif
+
+TEST_CC := ${CC}
 CC += ${CFLAGS} ${LDFLAGS}
 SCC ?= ${CC} ${CFLAGS} ${LDFLAGS}
 
@@ -222,42 +232,34 @@ all: default timecop generic 511 512 1024 2048
 generic: testrandom.out
 
 511: costpoly511.out checkct511untuned bench511untuned test511.out \
-checkct511mults bench511mults \
 checkct511cycles bench511cycles \
 ubench511 umults511
 
 512: costpoly512.out checkct512untuned bench512untuned test512.out \
-checkct512mults bench512mults \
 checkct512cycles bench512cycles \
 ubench512 umults512
 
 1024: costpoly1024.out checkct1024untuned bench1024untuned test1024.out \
-checkct1024mults bench1024mults \
 checkct1024cycles bench1024cycles \
 ubench1024 umults1024
 
 2048: costpoly2048.out checkct2048untuned bench2048untuned test2048.out \
-checkct2048mults bench2048mults \
 checkct2048cycles bench2048cycles \
 ubench2048 umults2048
 
 timecop: \
-checkct511untuned checkct511mults checkct511cycles \
-checkct512untuned checkct512mults checkct512cycles \
-checkct1024untuned checkct1024mults checkct1024cycles \
-checkct2048untuned checkct2048mults checkct2048cycles \
+checkct511untuned checkct511cycles \
+checkct512untuned checkct512cycles \
+checkct1024untuned checkct1024cycles \
+checkct2048untuned checkct2048cycles \
 
 	valgrind ./checkct511untuned
-	valgrind ./checkct511mults
 	valgrind ./checkct511cycles
 	valgrind ./checkct512untuned
-	valgrind ./checkct512mults
 	valgrind ./checkct512cycles
 	valgrind ./checkct1024untuned
-	valgrind ./checkct1024mults
 	valgrind ./checkct1024cycles
 	valgrind ./checkct2048untuned
-	valgrind ./checkct2048mults
 	valgrind ./checkct2048cycles
 
 # ----- benchmarks:
@@ -265,73 +267,49 @@ checkct2048untuned checkct2048mults checkct2048cycles \
 checkct511cycles: checkct.c \
 libhighctidh_511.a libhighctidh_base.a libhighctidh_tunecycles511.a libtest.a
 	${CC} -DBITS=511 -D'NAMESPACEBITS(x)=highctidh_511_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
-		-o checkct511cycles checkct.c \
+		-o checkct511cycles checkct.c -DTIMECOP crypto_classify.c crypto_declassify.c \
 		libhighctidh_511.a libhighctidh_base.a libhighctidh_tunecycles511.a libtest.a
 
 checkct512cycles: checkct.c \
 libhighctidh_512.a libhighctidh_base.a libhighctidh_tunecycles512.a libtest.a
 	${CC} -DBITS=512 -D'NAMESPACEBITS(x)=highctidh_512_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
-		-o checkct512cycles checkct.c \
+		-o checkct512cycles checkct.c -DTIMECOP crypto_classify.c crypto_declassify.c \
 		libhighctidh_512.a libhighctidh_base.a libhighctidh_tunecycles512.a libtest.a
 
 checkct1024cycles: checkct.c \
 libhighctidh_1024.a libhighctidh_base.a libhighctidh_tunecycles1024.a libtest.a
 	${CC} -DBITS=1024 -D'NAMESPACEBITS(x)=highctidh_1024_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
-		-o checkct1024cycles checkct.c \
+		-o checkct1024cycles checkct.c -DTIMECOP crypto_classify.c crypto_declassify.c \
 		libhighctidh_1024.a libhighctidh_base.a libhighctidh_tunecycles1024.a libtest.a
 
 checkct2048cycles: checkct.c \
 libhighctidh_2048.a libhighctidh_base.a libhighctidh_tunecycles2048.a libtest.a
 	${CC} -DBITS=2048 -D'NAMESPACEBITS(x)=highctidh_2048_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
-		-o checkct2048cycles checkct.c \
+		-o checkct2048cycles checkct.c -DTIMECOP crypto_classify.c crypto_declassify.c \
 		libhighctidh_2048.a libhighctidh_base.a libhighctidh_tunecycles2048.a libtest.a
-
-checkct511mults: checkct.c \
-libhighctidh_511.a libhighctidh_base.a libtest.a
-	${CC} -DBITS=511 -D'NAMESPACEBITS(x)=highctidh_511_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
-		-o checkct511mults checkct.c \
-		libhighctidh_511.a libhighctidh_base.a libtest.a
-
-checkct512mults: checkct.c \
-libhighctidh_512.a libhighctidh_base.a libtest.a
-	${CC} -DBITS=512 -D'NAMESPACEBITS(x)=highctidh_512_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
-		-o checkct512mults checkct.c \
-		libhighctidh_512.a libhighctidh_base.a libtest.a
-
-checkct1024mults: checkct.c \
-libhighctidh_1024.a libhighctidh_base.a libtest.a
-	${CC} -DBITS=1024 -D'NAMESPACEBITS(x)=highctidh_1024_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
-		-o checkct1024mults checkct.c \
-		libhighctidh_1024.a libhighctidh_base.a libtest.a
-
-checkct2048mults: checkct.c \
-libhighctidh_2048.a libhighctidh_base.a libtest.a
-	${CC} -DBITS=2048 -D'NAMESPACEBITS(x)=highctidh_2048_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
-		-o checkct2048mults checkct.c \
-		libhighctidh_2048.a libhighctidh_base.a libtest.a
 
 checkct511untuned: checkct.c \
 libhighctidh_511.a libhighctidh_base.a libhighctidh_untuned.a libtest.a
 	${CC} -DBITS=511 -D'NAMESPACEBITS(x)=highctidh_511_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
-		-o checkct511untuned checkct.c \
+		-o checkct511untuned checkct.c -DTIMECOP crypto_classify.c crypto_declassify.c \
 		libhighctidh_511.a libhighctidh_base.a libhighctidh_untuned.a libtest.a
 
 checkct512untuned: checkct.c \
 libhighctidh_512.a libhighctidh_base.a libhighctidh_untuned.a libtest.a
 	${CC} -DBITS=512 -D'NAMESPACEBITS(x)=highctidh_512_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
-		-o checkct512untuned checkct.c \
+		-o checkct512untuned checkct.c -DTIMECOP crypto_classify.c crypto_declassify.c \
 		libhighctidh_512.a libhighctidh_base.a libhighctidh_untuned.a libtest.a
 
 checkct1024untuned: checkct.c \
 libhighctidh_1024.a libhighctidh_base.a libhighctidh_untuned.a libtest.a
 	${CC} -DBITS=1024 -D'NAMESPACEBITS(x)=highctidh_1024_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
-		-o checkct1024untuned checkct.c \
+		-o checkct1024untuned checkct.c -DTIMECOP crypto_classify.c crypto_declassify.c \
 		libhighctidh_1024.a libhighctidh_base.a libhighctidh_untuned.a libtest.a
 
 checkct2048untuned: checkct.c \
 libhighctidh_2048.a libhighctidh_base.a libhighctidh_untuned.a libtest.a
 	${CC} -DBITS=2048 -D'NAMESPACEBITS(x)=highctidh_2048_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
-		-o checkct2048untuned checkct.c \
+		-o checkct2048untuned checkct.c -DTIMECOP crypto_classify.c crypto_declassify.c \
 		libhighctidh_2048.a libhighctidh_base.a libhighctidh_untuned.a libtest.a
 
 bench511cycles: bench.c \
@@ -357,30 +335,6 @@ libhighctidh_2048.a libhighctidh_base.a libhighctidh_tunecycles2048.a libtest.a
 	${CC} -DBITS=2048 -D'NAMESPACEBITS(x)=highctidh_2048_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
 		-o bench2048cycles bench.c \
 		libhighctidh_2048.a libhighctidh_base.a libhighctidh_tunecycles2048.a libtest.a
-
-bench511mults: bench.c \
-libhighctidh_511.a libhighctidh_base.a libtest.a
-	${CC} -DBITS=511 -D'NAMESPACEBITS(x)=highctidh_511_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
-		-o bench511mults bench.c \
-		libhighctidh_511.a libhighctidh_base.a libtest.a
-
-bench512mults: bench.c \
-libhighctidh_512.a libhighctidh_base.a libtest.a
-	${CC} -DBITS=512 -D'NAMESPACEBITS(x)=highctidh_512_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
-		-o bench512mults bench.c \
-		libhighctidh_512.a libhighctidh_base.a libtest.a
-
-bench1024mults: bench.c \
-libhighctidh_1024.a libhighctidh_base.a libtest.a
-	${CC} -DBITS=1024 -D'NAMESPACEBITS(x)=highctidh_1024_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
-		-o bench1024mults bench.c \
-		libhighctidh_1024.a libhighctidh_base.a libtest.a
-
-bench2048mults: bench.c \
-libhighctidh_2048.a libhighctidh_base.a libtest.a
-	${CC} -DBITS=2048 -D'NAMESPACEBITS(x)=highctidh_2048_##x' -D'NAMESPACEGENERIC(x)=highctidh_##x' \
-		-o bench2048mults bench.c \
-		libhighctidh_2048.a libhighctidh_base.a libtest.a
 
 bench511untuned: bench.c \
 libhighctidh_511.a libhighctidh_base.a libhighctidh_untuned.a libtest.a
@@ -1000,7 +954,7 @@ examples-static: examples_static.c libhighctidh.a *.h
 	${CC} -static -Wall -Werror -Wpedantic examples_static.c -Wl,-Bstatic -L. -l:libhighctidh.a -o examples-static
 
 test: clean libhighctidh.so testrandom test511 test512 test1024 test2048
-		./test.sh
+		CC="${TEST_CC}" ./test.sh
 
 DESTDIR ?= /usr/local
 install: libhighctidh.so libhighctidh.a

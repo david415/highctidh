@@ -1,5 +1,3 @@
-// DO NOT EDIT: generated code, see gen/main.go
-
 package ctidh1024
 
 /*
@@ -8,15 +6,15 @@ package ctidh1024
 
 extern ctidh_fillrandom fillrandom_1024_custom;
 
-__attribute__((weak))
-void custom_gen_private(void *const context, private_key *priv) {
-  csidh_private_withrng(priv, (uintptr_t)context, fillrandom_1024_custom);
+void highctidh_1024_custom_gen_private(void *const context, private_key *priv) {
+  csidh_private_withrng_bytes(priv, (uintptr_t)context, fillrandom_1024_custom);
 }
 */
 import "C"
 import (
 	"crypto/hmac"
 	"encoding/base64"
+	"encoding/binary"
 	"io"
 	"unsafe"
 
@@ -64,16 +62,16 @@ func (p *PublicKey) String() string {
 
 // Reset resets the PublicKey to all zeros.
 func (p *PublicKey) Reset() {
-	zeros := make([]byte, PublicKeySize)
-	err := p.FromBytes(zeros)
-	if err != nil {
-		panic(err)
-	}
+	p.publicKey = C.public_key{}
 }
 
 // Bytes returns the PublicKey as a byte slice.
 func (p *PublicKey) Bytes() []byte {
-	return C.GoBytes(unsafe.Pointer(&p.publicKey.A.x.c), C.int(C.UINTBIG_LIMBS*8))
+	out := make([]byte, PublicKeySize)
+	for i, limb := range p.publicKey.A.x.c {
+		binary.LittleEndian.PutUint64(out[8*i:], uint64(limb))
+	}
+	return out
 }
 
 // FromBytes loads a PublicKey from the given byte slice.
@@ -82,10 +80,14 @@ func (p *PublicKey) FromBytes(data []byte) error {
 		return ErrPublicKeySize
 	}
 
-	p.publicKey = *((*C.public_key)(unsafe.Pointer(&data[0])))
-	if !C.validate(&p.publicKey) {
+	var publicKey C.public_key
+	for i := range publicKey.A.x.c {
+		publicKey.A.x.c[i] = C.uint64_t(binary.LittleEndian.Uint64(data[8*i:]))
+	}
+	if publicKey == (C.public_key{}) || !C.validate(&publicKey) {
 		return ErrPublicKeyValidation
 	}
+	p.publicKey = publicKey
 
 	return nil
 }
@@ -179,7 +181,11 @@ func (p *PrivateKey) FromBytes(data []byte) error {
 		return ErrPrivateKeySize
 	}
 
-	p.privateKey = *((*C.private_key)(unsafe.Pointer(&data[0])))
+	privateKey := *((*C.private_key)(unsafe.Pointer(&data[0])))
+	if !C.csidh_private_valid(&privateKey) {
+		return ErrPrivateKeyRange
+	}
+	p.privateKey = privateKey
 	return nil
 }
 
@@ -244,7 +250,7 @@ func GenerateKeyPair() (*PrivateKey, *PublicKey) {
 func GeneratePrivateKey(rng io.Reader) *PrivateKey {
 	privKey := &PrivateKey{}
 	p := gopointer.Save(rng)
-	C.custom_gen_private(p, &privKey.privateKey)
+	C.highctidh_1024_custom_gen_private(p, &privKey.privateKey)
 	gopointer.Unref(p)
 	return privKey
 }

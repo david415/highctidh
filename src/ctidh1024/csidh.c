@@ -19,23 +19,19 @@ const public_key base = {0}; /* A = 0 */
 void
 public_key_from_bytes(public_key *const pk, const char *const input)
 {
-	uint64_t *input_u64 = (uint64_t *)input;
 	for(size_t i=0; i < sizeof(pk->A.x.c)/sizeof(pk->A.x.c[0]); i++){
-    // We could write this as so on GNU/Linux, BSD, and MacOS
-		// pk->A.x.c[i] = le64toh(*input_u64++);
-    // however on Solaris 11.4 sparcv9 64bit it throws a hard error of
-    // 'multiple unsequenced modifications'
-		pk->A.x.c[i] = le64toh(*input_u64);
-    input_u64++;
+		uint64_t limb;
+		memcpy(&limb, input + 8 * i, sizeof(limb));
+		pk->A.x.c[i] = le64toh(limb);
 	}
 }
 
 void
 public_key_to_bytes(char *const output, const public_key *const pk)
 {
-	uint64_t *output_u64 = (uint64_t *)output;
 	for(size_t i=0; i < sizeof(pk->A.x.c)/sizeof(pk->A.x.c[0]); i++){
-		*output_u64++ = htole64(pk->A.x.c[i]);
+		uint64_t limb = htole64(pk->A.x.c[i]);
+		memcpy(output + 8 * i, &limb, sizeof(limb));
 	}
 }
 
@@ -315,7 +311,8 @@ void action(public_key *out, public_key const *in, private_key const *priv)
 }
 
 /* includes public-key validation. */
-bool csidh(public_key *out, public_key const *in, private_key const *priv)
+static bool csidh_on_stack(public_key *out, public_key const *in,
+    private_key const *priv)
 {
     if (!validate(in)) {
         fp_random(&out->A);
@@ -324,3 +321,42 @@ bool csidh(public_key *out, public_key const *in, private_key const *priv)
     action(out, in, priv);
     return true;
 }
+
+#if defined(__OpenBSD__)
+#include <pthread.h>
+
+struct csidh_call {
+    public_key *out;
+    public_key const *in;
+    private_key const *priv;
+    bool ok;
+};
+
+static void *csidh_thread(void *arg)
+{
+    struct csidh_call *c = arg;
+    c->ok = csidh_on_stack(c->out, c->in, c->priv);
+    return NULL;
+}
+
+bool csidh(public_key *out, public_key const *in, private_key const *priv)
+{
+    struct csidh_call c = {out, in, priv, false};
+    pthread_attr_t attr;
+    pthread_t t;
+    if (pthread_attr_init(&attr) != 0)
+        return csidh_on_stack(out, in, priv);
+    int err = pthread_attr_setstacksize(&attr, 1 << 21) ||
+        pthread_create(&t, &attr, csidh_thread, &c);
+    pthread_attr_destroy(&attr);
+    if (err)
+        return csidh_on_stack(out, in, priv);
+    pthread_join(t, NULL);
+    return c.ok;
+}
+#else
+bool csidh(public_key *out, public_key const *in, private_key const *priv)
+{
+    return csidh_on_stack(out, in, priv);
+}
+#endif
