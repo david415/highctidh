@@ -14,7 +14,7 @@ same underlying C or assembler implementations:
 - C Library
 - Python module
 - Golang module
-- Rust crate (CTIDH-1024)
+- Rust crate
 
 ## Nix
 
@@ -99,8 +99,9 @@ CGO_LDFLAGS: -Wl,-stack_size,0x1F40000
 
 ## Rust bindings
 
-The `src/rust` crate builds CTIDH-1024 from `src/ctidh1024` and needs no
-installed library. Add it to a Cargo project as a git dependency:
+The Rust crate in `src/rust`, with its `Cargo.toml` at the repository root,
+builds all four sizes from `src` and needs no installed library. Add it to a
+Cargo project as a git dependency:
 ```
 highctidh = { git = "https://codeberg.org/vula/highctidh" }
 ```

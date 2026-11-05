@@ -2,12 +2,25 @@
 name = "highctidh"
 version = "1.0.2026101300"
 edition = "2024"
-description = "CTIDH-1024 from the highctidh C library"
-license-file = "../../LICENSE"
+description = "CTIDH-511, CTIDH-512, CTIDH-1024 and CTIDH-2048 from the highctidh C library"
+license-file = "LICENSE"
 repository = "https://codeberg.org/vula/highctidh"
 publish = false
+build = "src/rust/build.rs"
+
+[lib]
+path = "src/rust/lib.rs"
+
+[[test]]
+name = "go_vectors"
+path = "src/rust/tests/go_vectors.rs"
+
+[features]
+# Use the fiat C field arithmetic instead of the x86_64 or aarch64 assembly.
+portable = []
 
 [dependencies]
+base64 = "0.22"
 rand_core = "0.10"
 subtle = "2.6.1"
 zeroize = { version = "1.9.1", features = ["derive"] }

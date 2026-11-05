@@ -8,5 +8,6 @@ steps:
     commands:
       - export CI=true
       - rustup component add clippy
-      - cargo test --manifest-path src/rust/Cargo.toml
-      - cargo clippy --manifest-path src/rust/Cargo.toml --all-targets -- -D warnings
+      - cargo test
+      - cargo test --features portable
+      - cargo clippy --all-targets -- -D warnings
