@@ -9,11 +9,12 @@ confirms otherwise.
 
 # Quick start
 
-The `highctidh` project offers three compatible interfaces that all use the
+The `highctidh` project offers four compatible interfaces that all use the
 same underlying C or assembler implementations:
 - C Library
 - Python module
 - Golang module
+- Rust crate (CTIDH-1024)
 
 ## Nix
 
@@ -95,6 +96,16 @@ For MacOS:
 ```
 CGO_LDFLAGS: -Wl,-stack_size,0x1F40000
 ```
+
+## Rust bindings
+
+The `src/rust` crate builds CTIDH-1024 from `src/ctidh1024` and needs no
+installed library. Add it to a Cargo project as a git dependency:
+```
+highctidh = { git = "https://codeberg.org/vula/highctidh" }
+```
+
+See `src/rust/README.md` for details.
 
 # highctidh improvements
 

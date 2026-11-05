@@ -1,0 +1,23 @@
+[package]
+name = "highctidh"
+version = "1.0.2026101300"
+edition = "2024"
+description = "CTIDH-1024 from the highctidh C library"
+license-file = "../../LICENSE"
+repository = "https://codeberg.org/vula/highctidh"
+publish = false
+
+[dependencies]
+rand_core = "0.10"
+subtle = "2.6.1"
+zeroize = { version = "1.9.1", features = ["derive"] }
+
+[build-dependencies]
+cc = "1.2"
+
+[dev-dependencies]
+blake2 = "0.10"
+getrandom = { version = "0.4", features = ["sys_rng"] }
+hex = "0.4.3"
+hkdf = "0.12"
+serde_json = "1"

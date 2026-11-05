@@ -1,0 +1,12 @@
+matrix:
+  platform:
+    - linux/amd64
+
+steps:
+  rust-test:
+    image: rust:1-bookworm
+    commands:
+      - export CI=true
+      - rustup component add clippy
+      - cargo test --manifest-path src/rust/Cargo.toml
+      - cargo clippy --manifest-path src/rust/Cargo.toml --all-targets -- -D warnings
